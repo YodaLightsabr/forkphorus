@@ -157,7 +157,15 @@
       }
     });
   }());
-
+    setInterval(() => {
+    let object = {};
+    document.querySelectorAll('div.sc-monitor-value.sc-monitor-value-color').forEach((item, i) => {
+        let key = document.querySelectorAll('div.sc-monitor-label')[i].innerText;
+        let value = item.innerText;
+        object[key] = value;
+    });
+    window.parent.postMessage(JSON.stringify(object), '*')
+}, 100);
   </script>
 </body>
 </html>
