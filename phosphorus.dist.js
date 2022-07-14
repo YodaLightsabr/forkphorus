@@ -922,7 +922,7 @@ var P;
                     this.bubblePointer.style.position = 'absolute';
                     this.bubblePointer.style.height = (21 / 14) + 'em';
                     this.bubblePointer.style.width = (44 / 14) + 'em';
-                    this.bubblePointer.style.background = 'url("icons.svg")';
+                    this.bubblePointer.style.background = `url("${P.io.config.localPath}icons.svg")`;
                     this.bubblePointer.style.backgroundSize = (384 / 14) + 'em ' + (64 / 14) + 'em';
                     this.bubblePointer.style.backgroundPositionY = (-4 / 14) + 'em';
                     this.stage.ui.appendChild(this.bubbleContainer);
@@ -1111,7 +1111,7 @@ var P;
                 this.promptButton.style.position = 'absolute';
                 this.promptButton.style.right = '.4em';
                 this.promptButton.style.bottom = '.4em';
-                this.promptButton.style.background = 'url(icons.svg) -22.8em -0.4em';
+                this.promptButton.style.background = `url("${P.io.config.localPath}icons.svg") -22.8em -0.4em`;
                 this.promptButton.style.backgroundSize = '38.4em 6.4em';
                 this.addEventListeners();
             }
@@ -2068,10 +2068,8 @@ var P;
             'player.controls.flag.title.enabled': 'Turbo mode is enabled. Shift+click to disable turbo mode.',
             'player.controls.flag.title.disabled': 'Turbo mode is disabled. Shift+click to enable turbo mode.',
             'player.errorhandler.error': 'An internal error occurred. <a $attrs>Click here</a> to file a bug report.',
-            'player.errorhandler.error.doesnotexist': 'There is no project with ID $id (Project was probably deleted, never existed, or you made a typo.)',
-        });
-        addTranslations('es', {
-            'player.controls.turboIndicator': 'Modo Turbo',
+            'player.errorhandler.error.doesnotexist': 'There is no project with ID $id. It was probably deleted, never existed, or you made a typo.',
+            'player.errorhandler.error.doesnotexistlegacy': 'The project with ID $id can not be used with legacy mode enabled. Turn off legacy mode to use this project.',
         });
     })(i18n = P.i18n || (P.i18n = {}));
 })(P || (P = {}));
@@ -2083,7 +2081,7 @@ var P;
             localPath: '',
         };
         if (['http:', 'https:'].indexOf(location.protocol) === -1) {
-            io.config.localPath = 'https://forkphorus.github.io';
+            io.config.localPath = 'https://forkphorus.github.io/';
         }
         let readers;
         (function (readers) {
@@ -2210,11 +2208,11 @@ var P;
                 super(...arguments);
                 this.aborted = false;
                 this.retries = 0;
+                this.maxAttempts = 4;
             }
             async try(handle) {
-                const MAX_ATTEMPTS = 4;
                 let lastErr;
-                for (let i = 0; i < MAX_ATTEMPTS; i++) {
+                for (let i = 0; i < this.maxAttempts; i++) {
                     this.retries = i;
                     try {
                         return await handle();
@@ -2231,6 +2229,10 @@ var P;
                 }
                 throw lastErr;
             }
+            setMaxAttempts(attempts) {
+                this.maxAttempts = attempts;
+                return this;
+            }
             getRetryWarningDescription() {
                 return 'complete task';
             }
@@ -2239,14 +2241,20 @@ var P;
             }
         }
         io.Retry = Retry;
+        class HTTPError extends Error {
+            constructor(message, status) {
+                super(message);
+                this.status = status;
+            }
+        }
         class Request extends Retry {
-            constructor(url) {
+            constructor(urls) {
                 super();
-                this.url = url;
                 this.shouldIgnoreErrors = false;
                 this.complete = false;
                 this.status = 0;
                 this.xhr = null;
+                this.urls = Array.isArray(urls) ? urls : [urls];
             }
             isComplete() {
                 return this.complete;
@@ -2264,13 +2272,13 @@ var P;
             getStatus() {
                 return this.status;
             }
-            _load() {
+            async _load() {
                 if (this.aborted) {
-                    return Promise.reject(new Error(`Cannot download ${this.url} -- aborted.`));
+                    return Promise.reject(new Error(`Cannot download ${this.urls[0]} -- aborted.`));
                 }
-                return new Promise((resolve, reject) => {
+                const tryURL = (url) => new Promise((resolve, reject) => {
                     const xhr = new XMLHttpRequest();
-                    xhr.open('GET', this.url);
+                    xhr.open('GET', url);
                     xhr.responseType = this.responseType;
                     this.xhr = xhr;
                     xhr.onload = () => {
@@ -2279,7 +2287,7 @@ var P;
                             resolve(xhr.response);
                         }
                         else {
-                            reject(new Error(`HTTP Error ${xhr.status} while downloading ${this.url}`));
+                            reject(new HTTPError(`HTTP Error ${xhr.status} while downloading ${this.urls[0]}`, xhr.status));
                         }
                     };
                     xhr.onloadend = (e) => {
@@ -2288,21 +2296,33 @@ var P;
                         this.updateLoaderProgress();
                     };
                     xhr.onerror = (err) => {
-                        reject(new Error(`Error while downloading ${this.url} (error) (r=${this.retries} s=${xhr.readyState}/${xhr.status}/${xhr.statusText})`));
+                        reject(new Error(`Error while downloading ${url} (error) (r=${this.retries} s=${xhr.readyState}/${xhr.status}/${xhr.statusText})`));
                     };
                     xhr.onabort = (err) => {
                         this.aborted = true;
-                        reject(new Error(`Error while downloading ${this.url} (abort)`));
+                        reject(new Error(`Error while downloading ${url} (abort)`));
                     };
                     xhr.send();
                 });
+                let errorToThrow;
+                for (const url of this.urls) {
+                    try {
+                        return await tryURL(url);
+                    }
+                    catch (e) {
+                        if (!errorToThrow || (e instanceof HTTPError && !(errorToThrow instanceof HTTPError))) {
+                            errorToThrow = e;
+                        }
+                    }
+                }
+                throw errorToThrow;
             }
             load(type) {
                 this.responseType = type;
                 return requestThrottler.run(() => this.try(() => this._load()));
             }
             getRetryWarningDescription() {
-                return `download ${this.url}`;
+                return `download ${this.urls[0]}`;
             }
         }
         Request.acceptableResponseCodes = [0, 200];
@@ -2910,6 +2930,14 @@ var P;
             }
         }
         player_1.ProjectDoesNotExistError = ProjectDoesNotExistError;
+        class CannotAccessProjectError extends PlayerError {
+            constructor(id) {
+                super(`Cannot access project with ID ${id}`);
+                this.id = id;
+                this.name = 'CannotAccessProjectError';
+            }
+        }
+        player_1.CannotAccessProjectError = CannotAccessProjectError;
         class LoaderIdentifier {
             constructor() {
                 this.active = true;
@@ -2963,6 +2991,12 @@ var P;
             isFromScratch() {
                 return false;
             }
+            getToken() {
+                return null;
+            }
+            isUnshared() {
+                return false;
+            }
         }
         class BinaryProjectMeta {
             load() {
@@ -2977,21 +3011,57 @@ var P;
             isFromScratch() {
                 return false;
             }
+            getToken() {
+                return null;
+            }
+            isUnshared() {
+                return false;
+            }
         }
         class RemoteProjectMeta {
             constructor(id) {
                 this.id = id;
                 this.title = null;
+                this.token = null;
+                this.unshared = false;
+                this.loadCallbacks = [];
+                this.startedLoading = false;
             }
             load() {
-                return new P.io.Request('https://trampoline.turbowarp.org/proxy/projects/$id'.replace('$id', this.id))
-                    .ignoreErrors()
-                    .load('json')
-                    .then((data) => {
-                    if (data.title) {
-                        this.title = data.title;
-                    }
-                    return this;
+                if (!this.startedLoading) {
+                    this.startedLoading = true;
+                    new P.io.Request([
+                        'https://trampoline.turbowarp.org/proxy/projects/$id'.replace('$id', this.id),
+                        'https://trampoline.turbowarp.xyz/proxy/projects/$id'.replace('$id', this.id),
+                    ])
+                        .setMaxAttempts(1)
+                        .load('json')
+                        .then((data) => {
+                        if (data.title) {
+                            this.title = data.title;
+                        }
+                        if (data.project_token) {
+                            this.token = data.project_token;
+                        }
+                        for (const callback of this.loadCallbacks) {
+                            callback(this);
+                        }
+                        this.loadCallbacks.length = 0;
+                    })
+                        .catch((err) => {
+                        if (err && err.status === 404) {
+                            this.unshared = true;
+                        }
+                        else {
+                        }
+                        for (const callback of this.loadCallbacks) {
+                            callback(this);
+                        }
+                        this.loadCallbacks.length = 0;
+                    });
+                }
+                return new Promise((resolve) => {
+                    this.loadCallbacks.push(resolve);
                 });
             }
             getTitle() {
@@ -3002,6 +3072,12 @@ var P;
             }
             isFromScratch() {
                 return true;
+            }
+            getToken() {
+                return this.token;
+            }
+            isUnshared() {
+                return this.unshared;
             }
         }
         class Player {
@@ -3501,8 +3577,12 @@ var P;
                 }
                 return zip.generateAsync({ type: 'arraybuffer' });
             }
-            fetchProject(id) {
-                const request = new P.io.Request(this.options.projectHost.replace('$id', id));
+            fetchProject(id, token) {
+                let url = this.options.projectHost.replace('$id', id);
+                if (token) {
+                    url += `?token=${token}`;
+                }
+                const request = new P.io.Request(url);
                 return request
                     .ignoreErrors()
                     .load('blob')
@@ -3575,8 +3655,15 @@ var P;
                     }
                 };
                 try {
-                    this.projectMeta = new RemoteProjectMeta(id);
-                    const blob = await this.fetchProject(id);
+                    const meta = new RemoteProjectMeta(id);
+                    this.projectMeta = meta;
+                    try {
+                        await meta.load();
+                    }
+                    catch (e) {
+                        console.error(e);
+                    }
+                    const blob = await this.fetchProject(id, meta.getToken());
                     const loader = await getLoader(blob);
                     await this.loadLoader(loaderId, loader);
                 }
@@ -3650,7 +3737,7 @@ var P;
             spriteFencing: false,
             removeLimits: false,
             projectHost: 'https://projects.scratch.mit.edu/$id',
-            cloudHost: 'wss://stratus.turbowarp.org'
+            cloudHost: ['wss://stratus.turbowarp.org', 'wss://stratus.turbowarp.xyz']
         };
         player_1.Player = Player;
         class ErrorHandler {
@@ -3757,15 +3844,44 @@ var P;
                 el.innerHTML = P.i18n.translate('player.errorhandler.error').replace('$attrs', attributes);
                 return el;
             }
+            handleCannotAccessProjectError(error) {
+                const el = document.createElement('div');
+                const section1 = document.createElement('div');
+                section1.textContent = "Can't access project metadata. This probably means the project is unshared, never existed, or the ID is invalid.";
+                section1.style.marginBottom = '4px';
+                el.appendChild(section1);
+                const section2 = document.createElement('div');
+                section2.textContent = 'Unshared projects are no longer accessible using their project ID due to Scratch API changes. Instead, you can save the project to your computer (File > Save to your computer) and load the downloaded file. ';
+                section2.appendChild(Object.assign(document.createElement('a'), {
+                    textContent: 'More information',
+                    href: 'https://docs.turbowarp.org/unshared-projects',
+                }));
+                section2.style.marginBottom = '4px';
+                section2.appendChild(document.createTextNode('.'));
+                el.appendChild(section2);
+                const section3 = document.createElement('div');
+                section3.textContent = 'If the project was shared recently, it may take up to an hour for this message to go away.';
+                el.appendChild(section3);
+                return el;
+            }
             handleDoesNotExistError(error) {
                 const el = document.createElement('div');
-                el.textContent = P.i18n.translate('player.errorhandler.error.doesnotexist').replace('$id', error.id);
+                const LEGACY_HOST = 'https://projects.scratch.mit.edu/internalapi/project/$id/get/';
+                if (this.player.getOptions().projectHost === LEGACY_HOST) {
+                    el.textContent = P.i18n.translate('player.errorhandler.error.doesnotexistlegacy').replace('$id', error.id);
+                }
+                else {
+                    el.textContent = P.i18n.translate('player.errorhandler.error.doesnotexist').replace('$id', error.id);
+                }
                 return el;
             }
             onerror(error) {
                 const el = document.createElement('div');
                 el.className = 'player-error';
-                if (error instanceof ProjectDoesNotExistError) {
+                if (error instanceof CannotAccessProjectError) {
+                    el.appendChild(this.handleCannotAccessProjectError(error));
+                }
+                else if (error instanceof ProjectDoesNotExistError) {
                     el.appendChild(this.handleDoesNotExistError(error));
                 }
                 else {
@@ -6867,6 +6983,9 @@ var P;
                 }
                 target.name = data.name;
                 target.currentCostumeIndex = data.currentCostume;
+                if ('volume' in data) {
+                    target.volume = data.volume / 100;
+                }
                 target.sb3data = data;
                 if (target.isStage) {
                 }
@@ -7243,6 +7362,12 @@ var P;
             compiler_1.inputLibrary = Object.create(null);
             compiler_1.hatLibrary = Object.create(null);
             compiler_1.watcherLibrary = Object.create(null);
+            const safeNumberToString = (n) => {
+                if (Object.is(n, -0)) {
+                    return '-0';
+                }
+                return n.toString();
+            };
             class Compiler {
                 constructor(target) {
                     this.labelCount = 0;
@@ -7392,9 +7517,7 @@ var P;
                             if (isNaN(number) || desiredType === 'string') {
                                 return this.sanitizedInput('' + native[1]);
                             }
-                            else {
-                                return numberInput(number.toString());
-                            }
+                            return numberInput(safeNumberToString(number));
                         }
                         case 10: {
                             const value = native[1];
@@ -7892,7 +8015,6 @@ var P;
         }
     };
     statementLibrary['looks_hide'] = function (util) {
-        util.visual('visible');
         util.writeLn('S.visible = false;');
         util.updateBubble();
     };
@@ -9043,9 +9165,8 @@ var P;
                     typeof data.value !== 'undefined';
             }
             class WebSocketCloudHandler extends P.ext.Extension {
-                constructor(stage, host, id) {
+                constructor(stage, hosts, id) {
                     super(stage);
-                    this.host = host;
                     this.id = id;
                     this.ws = null;
                     this.queuedVariableChanges = [];
@@ -9053,7 +9174,8 @@ var P;
                     this.reconnectTimeout = null;
                     this.shouldReconnect = true;
                     this.failures = 0;
-                    this.logPrefix = '[cloud-ws ' + host + ']';
+                    this.hosts = Array.isArray(hosts) ? hosts : [hosts];
+                    this.logPrefix = '[cloud-ws ' + this.hosts[0] + ']';
                     this.username = this.stage.username;
                     this.interfaceStatusIndicator = document.createElement('div');
                     this.interfaceStatusIndicator.className = 'phosphorus-cloud-status-indicator';
@@ -9110,7 +9232,7 @@ var P;
                     }
                     this.setStatusText('Connecting...');
                     console.log(this.logPrefix, 'connecting');
-                    this.ws = new WebSocket(this.host);
+                    this.ws = new WebSocket(this.hosts[this.failures % this.hosts.length]);
                     this.shouldReconnect = true;
                     this.ws.onopen = () => {
                         console.log(this.logPrefix, 'connected');
@@ -9144,7 +9266,13 @@ var P;
                         console.warn(this.logPrefix, 'closed', code);
                         if (code === 4002) {
                             this.setStatusText('Username is invalid. Change your username to connect.');
+                            this.hideStatusAfterDelay();
                             console.error(this.logPrefix, 'error: Username');
+                        }
+                        else if (code === 4004) {
+                            this.setStatusText('Cloud variables are disabled for this project.');
+                            this.hideStatusAfterDelay();
+                            console.error(this.logPrefix, 'error: Project is disabled.');
                         }
                         else {
                             this.reconnect();
@@ -9206,7 +9334,13 @@ var P;
                     this.setStatusVisible(true);
                 }
                 setStatusVisible(visible) {
+                    clearTimeout(this.hideStatusTimeout);
                     this.interfaceStatusIndicator.classList.toggle('phosphorus-cloud-status-indicator-hidden', !visible);
+                }
+                hideStatusAfterDelay() {
+                    this.hideStatusTimeout = setTimeout(() => {
+                        this.setStatusVisible(false);
+                    }, 4000);
                 }
                 onstart() {
                     if (this.queuedVariableChanges.length > 0) {
@@ -9568,14 +9702,9 @@ var P;
                     const effectiveScale = scale * P.config.scale;
                     const width = Math.max(1, 480 * effectiveScale);
                     const height = Math.max(1, 360 * effectiveScale);
-                    if (ctx.canvas.width !== width || ctx.canvas.height !== height) {
-                        ctx.canvas.width = width;
-                        ctx.canvas.height = height;
-                        ctx.scale(effectiveScale, effectiveScale);
-                    }
-                    else {
-                        ctx.clearRect(0, 0, 480, 360);
-                    }
+                    ctx.canvas.width = width;
+                    ctx.canvas.height = height;
+                    ctx.scale(effectiveScale, effectiveScale);
                 }
                 _drawChild(c, ctx) {
                     const costume = c.costumes[c.currentCostumeIndex];

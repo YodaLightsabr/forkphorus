@@ -57,7 +57,6 @@
     input[type=text], input[type=number], input[type=checkbox], select {
       box-sizing: border-box;
       width: 100%;
-      color: black;
       padding: 2px;
     }
     label ~ label input[type=radio] {
@@ -79,10 +78,11 @@
       cursor: pointer;
     }
 
-    @media (prefers-color-scheme: dark) {
-      body {
+    @media (prefers-color-scheme: light) {
+      :root {
         background-color: #111;
         color: #ddd;
+        color-scheme: dark;
       }
       a {
         color: #4af;
@@ -97,6 +97,15 @@
         border-color: rgb(53, 53, 53);
       }
     }
+
+    .migration {
+      border: 2px solid #ff4c4c;
+      border-radius: 8px;
+      padding: 8px;
+    }
+    .migration ul {
+      margin: 4px 0 0 0;
+    }
   </style>
   <title>HTML Packager - forkphorus</title>
 </head>
@@ -106,10 +115,21 @@
 
   <p>The HTML packager allows you to generate an HTML file for a Scratch project.</p>
 
+  <div class="migration">
+    <div>
+      The forkphorus packager still works and always will, but we think you should be using the <a href="https://packager.turbowarp.org/">TurboWarp Packager</a> instead:
+    </div>
+    <ul>
+      <li>It almost always generates faster and smaller files</li>
+      <li>It has a lot more customization options</li>
+      <li>It remembers all of your choices between visits</li>
+      <li>It can generate applications for Windows, macOS, or Linux completely automatically</li>
+    </ul>
+  </div>
+
   <noscript><b>This page requires JavaScript to work properly.</b></noscript>
 
   <ul>
-    <li>Consider trying out the new <a href="https://packager.turbowarp.org/">TurboWarp Packager</a></li>
     <li>Guide: <a href="guide.html" target="_blank">Forkphorus Packager Guide (Windows, Mac, Linux, Android)</a></li>
     <li>Additional Help: Create an issue on <a href="https://github.com/forkphorus/forkphorus/issues" target="_blank" rel="noopener">GitHub</a></li>
   </ul>
@@ -557,7 +577,7 @@
         { value: 'phonegap', label: 'PhoneGap' },
         { value: 'nwjs-win', label: 'NW.js (Windows/Linux)' },
         { value: 'nwjs-mac', label: 'NW.js (Mac)' },
-        { value: 'zip', label: 'Zip' },
+        { value: 'zip', label: 'Zip (for websites)' },
       ])
       .description('Enable special behavior for certain environments. You <b>must</b> read <a href="guide.html" target="_blank">the guide</a> before changing this value. This setting does not do anything on its own, additional configuration and steps are required.')
       .add(environment);
@@ -761,15 +781,12 @@
           if (!/^\d+$/.test(projectId.value)) {
             throw new Error('Invalid Project ID');
           }
-          // Comply with CC BY-SA 2.0
-          packager.projectAttribution = 'Project is loaded from: https://scratch.mit.edu/projects/' + projectId.value + '. Projects from scratch.mit.edu are generally licensed under CC BY-SA 2.0';
           await packager.loadProjectById(projectId.value);
         } else if (projectSource.value === 'file') {
           if (!projectFile.value) {
             throw new Error('No file selected');
           }
           await packager.loadProjectFromFile(projectFile.value);
-          packager.projectAttribution = 'No license assumed.';
         } else {
           throw new Error('projectSource is an unknown value: ' + projectSource.value);
         }
